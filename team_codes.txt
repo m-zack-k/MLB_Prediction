@@ -1,0 +1,30 @@
+lan : Los Angeles Dodgers
+sfn : San Francisco Giants
+nya : New York Yankees
+bos : Boston Red Sox
+chn : Chicago Cubs
+sln : St. Louis Cardinals
+hou : Houston Astros
+atl : Atlanta Braves
+phi : Philadelphia Phillies
+nyn : New York Mets
+ana : Los Angeles Angels
+oak : Oakland Athletics
+sea : Seattle Mariners
+sdn : San Diego Padres
+cin : Cincinnati Reds
+cle : Cleveland Guardians
+cha : Chicago White Sox
+det : Detroit Tigers
+kca : Kansas City Royals
+min : Minnesota Twins
+mil : Milwaukee Brewers
+tba : Tampa Bay Rays
+tor : Toronto Blue Jays
+bal : Baltimore Orioles
+was : Washington Nationals
+mia : Miami Marlins
+pit : Pittsburgh Pirates
+col : Colorado Rockies
+ari : Arizona Diamondbacks
+tex : Texas Rangers
