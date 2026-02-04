@@ -1,5 +1,7 @@
 # MLB Predictor
 
+![MLB Logo](mlb_logo.png)
+
 Predict MLB game scores using historical game logs and a machine learning model.
 
 ## Description
