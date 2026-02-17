@@ -1,7 +1,7 @@
 import pandas as pd
 import glob
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_absolute_error
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.metrics import mean_absolute_error, accuracy_score, precision_score
 
 # -----------------------------
 # 1. Parser for Retrosheet Game Logs
@@ -110,45 +110,38 @@ mlb_data_final["team_code"] = mlb_data_final["team"].map(team_map)
 mlb_data_final["opp_code"] = mlb_data_final["opponent"].map(team_map)
 
 # -----------------------------
-# 4. Training
+# 4. Training (CLASSIFICATION)
 # -----------------------------
-# Updated Predictors list including Team IDs
+# Create the Target: 1 if the team won (scored more than opponent), else 0
+mlb_data_final["won"] = (mlb_data_final["runs_scored"] > mlb_data_final["runs_allowed"]).astype(int)
+
+# Predictors stay the same
 predictors = ["home_away", "day", "team_code", "opp_code"] + new_cols + [f"opp_{c}" for c in new_cols]
 
 train = mlb_data_final[mlb_data_final["date"] < "2024-01-01"]
 test = mlb_data_final[mlb_data_final["date"] >= "2024-01-01"]
 
-# Initialize Model
-# min_samples_leaf=5 prevents overfitting (memorizing specific games)
-rf_reg = RandomForestRegressor(n_estimators=200, min_samples_leaf=5, random_state=1)
-rf_reg.fit(train[predictors], train["runs_scored"])
+# Use Classifier instead of Regressor
+rf = RandomForestClassifier(n_estimators=200, min_samples_split=10, random_state=1)
+rf.fit(train[predictors], train["won"])
 
 # -----------------------------
 # 5. Evaluation
 # -----------------------------
-test_eval = test.copy()
-test_preds = rf_reg.predict(test[predictors])
-test_eval['pred_runs_scored'] = test_preds
+# Get predictions (0 or 1)
+preds = rf.predict(test[predictors])
 
-# Merge predictions to compare Head-to-Head
-test_eval = test_eval.merge(
-    test_eval[['date', 'team', 'pred_runs_scored']], 
-    left_on=['date', 'opponent'], 
-    right_on=['date', 'team'], 
-    suffixes=('', '_opp')
-)
+# Measure Accuracy
+acc = accuracy_score(test["won"], preds)
+print(f"Win Prediction Accuracy: {acc:.2%}")
 
-test_eval['actual_win'] = (test_eval['runs_scored'] > test_eval['runs_allowed']).astype(int)
-test_eval['pred_win'] = (test_eval['pred_runs_scored'] > test_eval['pred_runs_scored_opp']).astype(int)
-
-accuracy = (test_eval['actual_win'] == test_eval['pred_win']).mean()
-mae = mean_absolute_error(test["runs_scored"], test_preds)
-
-print(f"Win Prediction Accuracy: {accuracy:.2%}")
-print(f"Mean Absolute Error (runs): {mae:.2f}")
+# Optional: See which features matter most
+# import pandas as pd
+# feature_importances = pd.Series(rf.feature_importances_, index=predictors).sort_values(ascending=False)
+# print(feature_importances.head(5))
 
 # -----------------------------
-# 6. Prediction Function
+# 6. Prediction Function (Probabilities)
 # -----------------------------
 def predict_game(home_team: str, away_team: str, date: str = None):
     home_team = home_team.upper()
@@ -163,9 +156,6 @@ def predict_game(home_team: str, away_team: str, date: str = None):
     home_data = mlb_data_rolling[mlb_data_rolling["team"] == home_team].sort_values("date")
     away_data = mlb_data_rolling[mlb_data_rolling["team"] == away_team].sort_values("date")
 
-    if home_data.empty or away_data.empty:
-        raise ValueError("Team not found or no data available.")
-
     home_latest = home_data.iloc[-1]
     away_latest = away_data.iloc[-1]
 
@@ -178,30 +168,37 @@ def predict_game(home_team: str, away_team: str, date: str = None):
             "opp_code": team_map[opp_code_str]
         }
         for c in new_cols:
-            row[c] = stats_own[c]         # Offense stats
-            row[f"opp_{c}"] = stats_opp[c] # Defense stats (opponent's rolling)
+            row[c] = stats_own[c]
+            row[f"opp_{c}"] = stats_opp[c]
         return row
 
-    # Build rows
+    # Build rows (We predict for BOTH sides to see who the model is more confident in)
     home_features = build_row(home_team, away_team, True, home_latest, away_latest)
     away_features = build_row(away_team, home_team, False, away_latest, home_latest)
 
-    # DataFrame and Predict
     X_new = pd.DataFrame([home_features, away_features], index=[home_team, away_team])
-    X_new = X_new[predictors] # Ensure correct column order
+    X_new = X_new[predictors]
 
-    preds = rf_reg.predict(X_new)
+    # PREDICT PROBABILITIES
+    # probs returns [[prob_loss, prob_win], [prob_loss, prob_win]]
+    probs = rf.predict_proba(X_new)
     
-    home_score = preds[0]
-    away_score = preds[1]
-    winner = home_team if home_score > away_score else away_team
+    home_win_prob = probs[0][1] # Probability home team wins
+    away_win_prob = probs[1][1] # Probability away team wins
+
+    # Logic: If Home win prob is 60% and Away win prob is 30% -> Winner Home
+    if home_win_prob > away_win_prob:
+        winner = home_team
+        confidence = home_win_prob
+    else:
+        winner = away_team
+        confidence = away_win_prob
 
     return {
         "home": home_team,
         "away": away_team,
-        "home_score": round(home_score, 2),
-        "away_score": round(away_score, 2),
-        "winner": winner
+        "winner": winner,
+        "confidence_score": round(confidence, 2)
     }
 
 # -----------------------------
@@ -213,8 +210,10 @@ away_input = input('Away team (3-letter code, lowercase): ')
 if home_input and away_input:
     try:
         result = predict_game(home_input, away_input)
-        print("\nPrediction Result:")
-        print(f"{result['home']} ({result['home_score']}) vs {result['away']} ({result['away_score']})")
+        print("\n-------------------------")
+        print(f"Matchup: {result['home']} vs {result['away']}")
         print(f"Predicted Winner: {result['winner']}")
+        print(f"Model Confidence: {result['confidence_score']:.1%}") # Formats 0.60 as 60.0%
+        print("-------------------------")
     except Exception as e:
         print(f"Error: {e}")
